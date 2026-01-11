@@ -1,0 +1,3 @@
+supabase
+schedule
+python-dotenv
