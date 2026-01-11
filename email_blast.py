@@ -1,21 +1,86 @@
+from http.server import BaseHTTPRequestHandler
+import json
 import smtplib
 from email.message import EmailMessage
-import time
-from dotenv import load_dotenv
 import os
-from supabase import create_client, Client
-from datetime import datetime
-import schedule
 
-# Load variables from .env
-load_dotenv()
-EMAIL = os.getenv("EMAIL")
-PASSWORD = os.getenv("PASSWORD")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        try:
+            # Read the webhook payload
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            # Extract member data from Supabase webhook
+            # Supabase sends: {"type": "INSERT", "table": "members", "record": {...}, "old_record": null}
+            record = data.get('record', {})
+            
+            firstname = record.get('firstname')
+            memberid = record.get('memberid')
+            schoolemail = record.get('schoolemail')
+            
+            # Validate required fields
+            if not all([firstname, memberid, schoolemail]):
+                self.send_response(400)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "error": "Missing required fields",
+                    "received": record
+                }).encode())
+                return
+            
+            # Send the email
+            send_welcome_email(firstname, memberid, schoolemail)
+            
+            # Success response
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "success": True,
+                "message": f"Email sent to {schoolemail}"
+            }).encode())
+            
+        except Exception as e:
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "error": str(e)
+            }).encode())
+    
+    def do_GET(self):
+        # Health check endpoint
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps({
+            "status": "ok",
+            "message": "AWS Learning Club Email Webhook is running"
+        }).encode())
 
-# Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def send_welcome_email(name, membership_id, email):
+    """Send welcome email to new member"""
+    EMAIL = os.environ.get("EMAIL")
+    PASSWORD = os.environ.get("PASSWORD")
+    
+    msg = EmailMessage()
+    msg["From"] = EMAIL
+    msg["To"] = email
+    msg["Subject"] = "🎉 Welcome to AWS Learning Club - UPHSL!"
+    msg.set_content(
+        f"Hi {name}, congratulations! Your membership has been approved. "
+        f"Your Membership ID is: {membership_id}"
+    )
+    msg.add_alternative(template(name, membership_id), subtype='html')
+    
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(EMAIL, PASSWORD)
+        server.send_message(msg)
 
 
 def template(name, membership_id):
@@ -134,88 +199,3 @@ def template(name, membership_id):
   </body>
 </html>
 """
-
-
-def send_welcome_emails():
-    """Fetch members from Supabase and send welcome emails to those who haven't received one"""
-    try:
-        print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting email job...")
-        
-        # Fetch members where email_sent is False
-        response = supabase.table("members").select("*").eq("email_sent", False).execute()
-        
-        members = response.data
-        
-        if not members:
-            print("No new members to send emails to.")
-            return
-        
-        print(f"Found {len(members)} member(s) to send emails to.")
-        
-        # Debug: Print the first member's keys to see column names
-        if members:
-            print(f"Available columns: {list(members[0].keys())}")
-            print(f"First member data: {members[0]}")
-        
-        # Connect to SMTP server
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
-            server.starttls()
-            server.login(EMAIL, PASSWORD)
-            
-            for member in members:
-                try:
-                    # Create email message
-                    msg = EmailMessage()
-                    msg["From"] = EMAIL
-                    msg["To"] = member["schoolemail"]
-                    msg["Subject"] = "🎉 Welcome to AWS Learning Club - UPHSL!"
-                    msg.set_content(
-                        f"Hi {member['firstname']}, congratulations! Your membership has been approved. "
-                        f"Your Membership ID is: {member['memberid']}"
-                    )
-                    msg.add_alternative(
-                        template(member["firstname"], member["memberid"]), 
-                        subtype='html'
-                    )
-                    
-                    # Send email
-                    server.send_message(msg)
-                    print(f"✓ Welcome email sent to {member['schoolemail']}")
-                    
-                    # Update email_sent to True in Supabase
-                    supabase.table("members").update({"email_sent": True}).eq("id", member["id"]).execute()
-                    print(f"✓ Updated email_sent status for {member['schoolemail']}")
-                    
-                    # Wait 2 seconds between emails to avoid rate limiting
-                    time.sleep(2)
-                    
-                except Exception as e:
-                    print(f"✗ Error sending email to {member.get('schoolemail', 'unknown')}: {str(e)}")
-                    continue
-        
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Email job completed.\n")
-        
-    except Exception as e:
-        print(f"Error in send_welcome_emails: {str(e)}")
-
-
-def run_scheduler():
-    """Run the scheduler that triggers email sending every minute"""
-    # Schedule the job to run every minute
-    schedule.every(1).minutes.do(send_welcome_emails)
-    
-    print("Email scheduler started. Checking for new members every minute.")
-    print("Press Ctrl+C to stop the scheduler.\n")
-    
-    # Keep the script running
-    while True:
-        schedule.run_pending()
-        time.sleep(1)  # Check every second
-
-
-if __name__ == "__main__":
-    # You can uncomment the line below to test immediately
-    # send_welcome_emails()
-    
-    # Run the scheduler
-    run_scheduler()
