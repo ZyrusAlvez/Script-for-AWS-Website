@@ -1,26 +1,29 @@
 from supabase import create_client, Client
 import os
+import random
+from datetime import datetime
 from typing import List
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def add_attendance(member_ids: List[str], event_ids: List[str]) -> dict:
-    """
-    Add attendance records for given member IDs and event IDs.
-    
-    Args:
-        member_ids: List of member identifiers to look up in members table
-        event_ids: List of event IDs for attendance records
-    
-    Returns:
-        dict: Result with success status and data/error info
-    """
-    # Initialize Supabase client
+def add_attendance_batch(prefix: str, eventid: str, member_ids: List[str]) -> dict:
     supabase: Client = create_client(
         os.getenv("SUPABASE_URL"),
         os.getenv("SUPABASE_KEY")
     )
+    
+    def generate_unique_certificate():
+        while True:
+            current_year = datetime.now().year
+            year_suffix = str(current_year)[-2:]
+            random_numbers = ''.join([str(random.randint(0, 9)) for _ in range(7)])
+            certificate = f"{prefix}{year_suffix}-{random_numbers}"
+            
+            # Check if certificate exists
+            existing = supabase.table("attendance").select("certificate").eq("certificate", certificate).execute()
+            if not existing.data:
+                return certificate
     
     try:
         print(f"Looking up {len(member_ids)} members...")
@@ -35,11 +38,12 @@ def add_attendance(member_ids: List[str], event_ids: List[str]) -> dict:
         
         attendance_records = []
         for member_id in member_db_ids:
-            for event_id in event_ids:
-                attendance_records.append({
-                    "memberid": member_id,
-                    "eventid": event_id
-                })
+            certificate = generate_unique_certificate()
+            attendance_records.append({
+                "memberid": member_id,
+                "eventid": eventid,
+                "certificate": certificate
+            })
         
         print(f"Creating {len(attendance_records)} attendance records...")
         result = supabase.table("attendance").insert(attendance_records).execute()
@@ -55,17 +59,13 @@ def add_attendance(member_ids: List[str], event_ids: List[str]) -> dict:
         print(f"Error: {str(e)}")
         return {"success": False, "error": str(e)}
 
-
 if __name__ == "__main__":
-    print("Starting attendance script...")
+    print("Starting batch attendance script...")
     
-    result = add_attendance(
-        member_ids=["aws26-0637"], 
-        event_ids=["38dae43d-2c2a-46a4-a2e2-f9e9cbae132a", 
-                   "48aa32f5-0297-43d6-b022-db2b132f4982", 
-                   "6ed808a6-e211-431b-8bb6-683859cb7125", 
-                   "a32c4de7-395f-447c-b861-555c0494f263", 
-                   "ae777e91-9def-44ee-b86f-05e8048ee0ff"]
+    result = add_attendance_batch(
+        prefix="ygg",
+        eventid="6f4e4193-2b2d-4dd1-bb36-c804f61886f0",
+        member_ids=["aws26-0637"]
     )
     
     if result["success"]:
