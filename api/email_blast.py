@@ -3,6 +3,7 @@ import json
 import smtplib
 from email.message import EmailMessage
 import os
+from supabase import create_client, Client
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -33,6 +34,10 @@ class handler(BaseHTTPRequestHandler):
             
             # Send the email
             send_welcome_email(firstname, memberid, schoolemail)
+            
+            # Update email_sent to true
+            supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
+            supabase.table("members").update({"email_sent": True}).eq("memberid", memberid).execute()
             
             # Success response
             self.send_response(200)
