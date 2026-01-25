@@ -3,14 +3,20 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import os
 from datetime import datetime
-import asyncio
-import threading
-import sys
+from supabase import create_client, Client
 
 # Load .env
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 STAGE_CHANNEL_ID = int(os.getenv("STAGE_CHANNEL_ID"))
+SUPABASE_URL = os.getenv("DISCORD_SUPABASE_URL")
+SUPABASE_KEY = os.getenv("DISCORD_SUPABASE_KEY")
+
+# Get meeting name from user input
+MEETING_NAME = input("Enter meeting name: ").strip()
+
+# Initialize Supabase
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Intents
 intents = discord.Intents.default()
@@ -23,6 +29,37 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Attendance storage
 # {user_id: {"join": datetime, "total_seconds": int}}
 attendance = {}
+
+def format_duration(seconds):
+    """Convert seconds to readable format like 20s, 1h 28m 8s"""
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+    
+    if hours > 0:
+        return f"{hours}h {minutes}m {secs}s"
+    elif minutes > 0:
+        return f"{minutes}m {secs}s"
+    else:
+        return f"{secs}s"
+
+def parse_duration(duration_str):
+    """Parse duration string back to seconds"""
+    if isinstance(duration_str, int):
+        return duration_str
+    
+    total_seconds = 0
+    parts = duration_str.split()
+    
+    for part in parts:
+        if part.endswith('h'):
+            total_seconds += int(part[:-1]) * 3600
+        elif part.endswith('m'):
+            total_seconds += int(part[:-1]) * 60
+        elif part.endswith('s'):
+            total_seconds += int(part[:-1])
+    
+    return total_seconds
 
 @bot.event
 async def on_ready():
@@ -62,54 +99,35 @@ async def on_voice_state_update(member, before, after):
             duration = (datetime.now() - join_time).total_seconds()
             attendance[member.id]["total_seconds"] += int(duration)
             print(f"{member.display_name} left the stage. Duration: {int(duration)} seconds")
-
-def show_current_attendance():
-    if not attendance:
-        print("\nNo attendance recorded yet.")
-        return
-    
-    print("\n=== Current Stage Attendance ===")
-    for user_id, data in attendance.items():
-        user = bot.get_user(user_id)
-        total_time = data.get("total_seconds", 0)
-        
-        # Add current session time if user is still in stage
-        if "join" in data:
-            current_session = (datetime.now() - data["join"]).total_seconds()
-            total_time += int(current_session)
-            status = "(currently in stage)"
-        else:
-            status = ""
             
-        minutes = total_time // 60
-        seconds = total_time % 60
-        display_name = user.display_name if user else user_id
-        print(f"{display_name}: {minutes}m {seconds}s {status}")
-    print("================================\n")
-
-def input_handler():
-    while True:
-        try:
-            key = input().strip().lower()
-            if key == 'q':
-                show_current_attendance()
-        except EOFError:
-            break
-        except KeyboardInterrupt:
-            break
+            # Save to Supabase - check if record exists first
+            try:
+                # Check if record exists
+                existing = supabase.table("attendance").select("*").eq("display_name", member.display_name).eq("meeting_name", MEETING_NAME).execute()
+                
+                if existing.data:
+                    # Update existing record
+                    current_duration_seconds = parse_duration(existing.data[0]["duration"])
+                    new_duration_seconds = current_duration_seconds + int(duration)
+                    formatted_duration = format_duration(new_duration_seconds)
+                    supabase.table("attendance").update({"duration": formatted_duration}).eq("display_name", member.display_name).eq("meeting_name", MEETING_NAME).execute()
+                    print(f"Updated {member.display_name}'s total duration to {formatted_duration}")
+                else:
+                    # Insert new record
+                    formatted_duration = format_duration(int(duration))
+                    supabase.table("attendance").insert({
+                        "display_name": member.display_name,
+                        "duration": formatted_duration,
+                        "meeting_name": MEETING_NAME
+                    }).execute()
+                    print(f"Created new record for {member.display_name} with {formatted_duration}")
+            except Exception as e:
+                print(f"Failed to save to database: {e}")
 
 async def main():
-    # Start input handler in separate thread
-    input_thread = threading.Thread(target=input_handler, daemon=True)
-    input_thread.start()
-    
-    print("Bot starting... Press 'q' + Enter to show current attendance")
-    
-    try:
-        await bot.start(TOKEN)
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-        await bot.close()
+    print(f"Bot starting... Meeting: {MEETING_NAME}")
+    await bot.start(TOKEN)
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
