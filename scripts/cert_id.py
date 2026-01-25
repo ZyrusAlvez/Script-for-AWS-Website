@@ -26,31 +26,27 @@ def add_attendance_batch(prefix: str, eventid: str, member_ids: List[str]) -> di
                 return certificate
     
     try:
-        print(f"Looking up {len(member_ids)} members...")
-        members_response = supabase.table("members").select("id").in_("memberid", member_ids).execute()
+        members_response = supabase.table("members").select("id, firstname, lastname").in_("memberid", member_ids).execute()
         
         if not members_response.data:
-            print("No members found!")
             return {"success": False, "error": "No members found"}
         
-        member_db_ids = [member["id"] for member in members_response.data]
-        print(f"Found {len(member_db_ids)} members")
-        
         attendance_records = []
-        for member_id in member_db_ids:
+        for member in members_response.data:
             certificate = generate_unique_certificate()
             attendance_records.append({
-                "memberid": member_id,
+                "memberid": member["id"],
                 "eventid": eventid,
                 "certificate": certificate
             })
+            full_name = f"{member['firstname']} {member['lastname']}"
+            print(f"{full_name} - {certificate}")
         
-        print(f"Creating {len(attendance_records)} attendance records...")
         result = supabase.table("attendance").insert(attendance_records).execute()
-        print("✓ Attendance records added successfully!")
+        print(f"✓ Saved {len(attendance_records)} records to attendance table")
         
         return {
-            "success": True,
+            "success": True,    
             "data": result.data,
             "records_added": len(attendance_records)
         }
@@ -60,15 +56,11 @@ def add_attendance_batch(prefix: str, eventid: str, member_ids: List[str]) -> di
         return {"success": False, "error": str(e)}
 
 if __name__ == "__main__":
-    print("Starting batch attendance script...")
-    
     result = add_attendance_batch(
-        prefix="ygg",
+        prefix="da",
         eventid="6f4e4193-2b2d-4dd1-bb36-c804f61886f0",
         member_ids=["aws26-0637"]
     )
     
-    if result["success"]:
-        print(f"Success! Added {result['records_added']} records")
-    else:
+    if not result["success"]:
         print(f"Error: {result['error']}")
