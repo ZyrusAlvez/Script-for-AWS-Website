@@ -60,12 +60,9 @@ if __name__ == "__main__":
     print("Starting attendance script...")
     
     result = add_attendance(
-        member_ids=["aws26-0637"], 
-        event_ids=["38dae43d-2c2a-46a4-a2e2-f9e9cbae132a", 
-                   "48aa32f5-0297-43d6-b022-db2b132f4982", 
-                   "6ed808a6-e211-431b-8bb6-683859cb7125", 
-                   "a32c4de7-395f-447c-b861-555c0494f263", 
-                   "ae777e91-9def-44ee-b86f-05e8048ee0ff"]
+        member_ids=["aws26-0495", "aws26-0342"], 
+        event_ids=["ae777e91-9def-44ee-b86f-05e8048ee0ff"
+]
     )
     
     if result["success"]:
