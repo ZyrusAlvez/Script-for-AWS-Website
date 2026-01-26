@@ -117,6 +117,7 @@ async def on_voice_state_update(member, before, after):
                     formatted_duration = format_duration(int(duration))
                     supabase.table("attendance").insert({
                         "display_name": member.display_name,
+                        "username": member.name,
                         "duration": formatted_duration,
                         "meeting_name": MEETING_NAME
                     }).execute()
